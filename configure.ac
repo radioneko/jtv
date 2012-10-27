@@ -25,5 +25,7 @@ AC_DEFINE([XML_DTD], 1,
 AC_DEFINE([XML_CONTEXT_BYTES], 1024,
 	[Define to specify how much context to retain around the current parse point.])
 
+LIBCURL_CHECK_CONFIG(,7.10)
+
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT
