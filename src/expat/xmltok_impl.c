@@ -77,6 +77,7 @@
     } \
   case BT_NMSTRT: \
   case BT_HEX: \
+  case BT_DIGIT: \
     ptr += MINBPC(enc); \
     break; \
   CHECK_NMSTRT_CASE(2, enc, ptr, end, nextTokPtr) \
