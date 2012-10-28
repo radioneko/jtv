@@ -132,7 +132,7 @@ jtv_select_stream(struct jtv_state *j)
 		fprintf(stderr, "Can't fetch usher status from %s\n", j->usher_url);
 		exit(EXIT_FAILURE);
 	}
-	if (http_code / 100 != 2) {
+	if (memcmp(j->usher_url, "file://", 7) != 0 && http_code / 100 != 2) {
 		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->usher_url, http_code);
 		exit(EXIT_FAILURE);
 	}
@@ -209,7 +209,7 @@ jtv_fetch_swf_url(struct jtv_state *j)
 		exit(EXIT_FAILURE);
 	}
 
-	if (http_code / 100 != 2) {
+	if (memcmp(j->page_url, "file://", 7) != 0 && http_code / 100 != 2) {
 		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->page_url, http_code);
 		exit(EXIT_FAILURE);
 	}
