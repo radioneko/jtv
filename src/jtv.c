@@ -33,6 +33,11 @@ struct jtv_state {
 	char					*usher_url;
 	usher_t					*usher;
 	struct jtv_node_list	streams;
+	union {
+		char				*body;
+		char				*swf_url;
+	};
+	unsigned				body_size;
 };
 
 /* id may be twitch or justin.tv URL or user id */
@@ -91,7 +96,8 @@ jtv_init(const char *id)
 	return j;
 }
 
-static size_t jtv_usher_recv(const void *ptr, size_t size, size_t nmemb, void *userdata)
+static size_t
+jtv_usher_recv(const void *ptr, size_t size, size_t nmemb, void *userdata)
 {
 	if (!usher_push_buf((usher_t*)userdata, ptr, size * nmemb)) {
 		fprintf(stderr, "usher XML not well formed\n");
@@ -101,6 +107,7 @@ static size_t jtv_usher_recv(const void *ptr, size_t size, size_t nmemb, void *u
 }
 
 
+/* Fetch usher streams list and ask user to select one */
 struct jtv_node*
 jtv_select_stream(struct jtv_state *j)
 {
@@ -111,6 +118,7 @@ jtv_select_stream(struct jtv_state *j)
 	struct jtv_node *jn;
 
 	curl_easy_setopt(j->http, CURLOPT_URL, j->usher_url);
+	curl_easy_setopt(j->http, CURLOPT_FOLLOWLOCATION, 1);
 	curl_easy_setopt(j->http, CURLOPT_WRITEFUNCTION, jtv_usher_recv);
 	curl_easy_setopt(j->http, CURLOPT_WRITEDATA, j->usher);
 	curl_easy_setopt(j->http, CURLOPT_ERRORBUFFER, err);
@@ -126,6 +134,7 @@ jtv_select_stream(struct jtv_state *j)
 	}
 	if (http_code / 100 != 2) {
 		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->usher_url, http_code);
+		exit(EXIT_FAILURE);
 	}
 
 	/* Now sort streams */
@@ -163,6 +172,83 @@ jtv_select_stream(struct jtv_state *j)
 	return NULL;
 }
 
+static size_t
+jtv_page_recv(const void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	struct jtv_state *j = userdata;
+	unsigned len = size * nmemb;
+	if (len) {
+		j->body = xrealloc(j->body, j->body_size + len + 1);
+		memcpy(j->body + j->body_size, ptr, len);
+		j->body_size += len;
+		j->body[j->body_size] = 0;
+	}
+	return len;
+}
+
+void
+jtv_fetch_swf_url(struct jtv_state *j)
+{
+	CURLcode code;
+	long http_code = 0;
+	char err[CURL_ERROR_SIZE];
+
+	curl_easy_setopt(j->http, CURLOPT_URL, j->page_url);
+	curl_easy_setopt(j->http, CURLOPT_FOLLOWLOCATION, 1);
+	curl_easy_setopt(j->http, CURLOPT_WRITEFUNCTION, jtv_page_recv);
+	curl_easy_setopt(j->http, CURLOPT_WRITEDATA, j);
+	curl_easy_setopt(j->http, CURLOPT_ERRORBUFFER, err);
+	code = curl_easy_perform(j->http);
+	if (code != CURLE_OK) {
+		fprintf(stderr, "Can't fetch justin page from %s:\n    %s\n", j->page_url, err);
+		exit(EXIT_FAILURE);
+	}
+	code = curl_easy_getinfo(j->http, CURLINFO_RESPONSE_CODE, &http_code);
+	if (code != CURLE_OK) {
+		fprintf(stderr, "Can't fetch justin page from %s\n", j->page_url);
+		exit(EXIT_FAILURE);
+	}
+
+	if (http_code / 100 != 2) {
+		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->page_url, http_code);
+		exit(EXIT_FAILURE);
+	}
+
+	if (!j->body) {
+		fprintf(stderr, "Empty response from server, url: %s\n", j->page_url);
+		exit(EXIT_FAILURE);
+	}
+
+	/* Now find swfObject string */
+	char *p = j->body;
+	static const char s[] = "swfobject.embedSWF(";
+	while (1) {
+		char *e, c;
+		p = strstr(p, s);
+		if (!p) {
+			fprintf(stderr, "Can't extract swf URL from %s\n", j->page_url);
+			exit(EXIT_FAILURE);
+		}
+		p += sizeof(s) - 1;
+		while (isspace(*p)) p++;
+		if (*p != '"' && *p != '\'')
+			continue;
+		p++;
+		for (e = p; *e && *e != '"' && *e != '\''; e++)
+			/* void */;
+		c = *e;
+		*e = 0;
+		if (strstr(p, "live_site_player") == NULL) {
+			*e = c;
+			continue;
+		}
+		e = xstrdup(p);
+		free (j->body);
+		j->swf_url = e;
+		break;
+	}
+}
+
 static void
 print_usage(const char *argv_0, int exit_code)
 {
@@ -175,13 +261,30 @@ print_usage(const char *argv_0, int exit_code)
 int main(int argc, char **argv)
 {
 	struct jtv_state *jtv;
+	struct jtv_node *s;
+	const char *rtmpdump = "rtmpdump";
+
 	if (argc < 2)
 		print_usage(argv[0], EXIT_FAILURE);
 
 	jtv = jtv_init(argv[1]);
 	printf("twitch url: %s\nusher url: %s\n", jtv->page_url, jtv->usher_url);
 
-	jtv_select_stream(jtv);
+	jtv_fetch_swf_url(jtv);
+	s = jtv_select_stream(jtv);
+	curl_easy_cleanup(jtv->http);
+
+	execl(rtmpdump,
+			rtmpdump,
+			"-r", s->jn_rtmp,
+			"-y", s->jn_playpath,
+			"-o", "/tmp/1.flv",
+			"-s", jtv->swf_url,
+			"-f", "LNX 11,2,202,238",
+			"-p", jtv->page_url,
+			"-j", s->jn_token,
+			NULL
+			);
 
 	return 0;
 }
