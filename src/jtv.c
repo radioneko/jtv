@@ -351,10 +351,12 @@ int main(int argc, char **argv)
 	} else {
 		int status;
 		close(flv_pipe[0]);
+		printf("Connecting to RTMP server...\n");
 		r = jrtmp_connect(s->jn_rtmp, s->jn_playpath, jtv->page_url,
 				s->jn_token, jtv->swf_url, "LNX 11,2,202,238",
 				flv_pipe[1]);
 
+		printf("Starting stream\n");
 		jrtmp_run(r);
 
 		close(flv_pipe[1]);

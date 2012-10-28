@@ -49,11 +49,14 @@ jrtmp_connect(const char *rtmp, const char *playpath,
 	AVal rnull = {0, 0};
 	AVal app = {0, 0};
 	AVal hostname = {0, 0};
+	AVal swfHash = {0, 0};
 	AVal pageUrl, flashVer, usherToken, swfUrl, playPath, tcUrl;
 	/* Parse RTMP url */
 	AVal parsedPlaypath;
 	unsigned int port = 0;
+	uint32_t swfSize = 0;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
+	unsigned char hash[RTMP_SWF_HASHLEN];
 
 	if (!RTMP_ParseURL
 			(rtmp, &protocol, &hostname, &port,
@@ -88,28 +91,31 @@ jrtmp_connect(const char *rtmp, const char *playpath,
 	
 	r = xcalloc(1, sizeof(*r));
 	RTMP_Init(&r->rtmp);
+	/* Hash SWF */
+	if (RTMP_HashSWF(swf_url, &swfSize, hash, 30 /* 30 days swf cache */) == 0) {
+		swfHash.av_val = (char*)hash;
+		swfHash.av_len = RTMP_SWF_HASHLEN;
+	}
 
 	RTMP_SetupStream(&r->rtmp, protocol, &hostname,
 			port, &rnull, &playPath, &tcUrl, &swfUrl,
-			&pageUrl, &app, &rnull, &rnull, 0,
+			&pageUrl, &app, &rnull, &swfHash, swfSize,
 			&flashVer, &rnull, &usherToken, 0 /*dSeek*/,
 			0 /* dStopOffset */, FALSE /* dLiveStream */, 
 			30 /* DEF_TIMEOUT */);
 	r->rtmp.Link.lFlags |= RTMP_LF_BUFX;
 
-	printf("SETUP OK\n");
 	RTMP_SetBufferMS(&r->rtmp, 10 * 60 * 60 * 1000);
 
 	if (!RTMP_Connect(&r->rtmp, NULL)) {
 		fprintf(stderr, "RTMP_Connect failed\n");
 		exit(EXIT_FAILURE);
 	}
-	printf("Connected\n");
+
 	if (!RTMP_ConnectStream(&r->rtmp, 0)) {
 		fprintf(stderr, "RTMP_ConnectStream failed\n");
 		exit(EXIT_FAILURE);
 	}
-	printf("Stream connected!\n");
 
 	r->outfd = outfd;
 
