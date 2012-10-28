@@ -6,6 +6,13 @@
 #include <stddef.h>
 #include <curl/curl.h>
 #include <assert.h>
+#include "jtv_rtmp.h"
+#include <time.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -13,19 +20,15 @@
 #include "usher.h"
 #include "jtv_memory.h"
 
-static char *read_file_to_string(const char *fname)
-{
-	int fd = open(fname, O_RDONLY);
-	char *res = malloc(65000);
-	int b = read(fd, res, 65000 - 1);
-	close(fd);
-	if (b >= 0) {
-		res[b] = 0;
-		return res;
-	}
-	free(res);
-	return NULL;
-}
+/* if CACHE_INT is defined, then jtv will save usher & justin pages to disk and later use them */
+//#define CACHE_INT	180
+
+#ifdef CACHE_INT
+#	define U_NAME "sample.xml"
+#	define P_NAME "sample.html"
+
+static FILE *u_out = NULL, *p_out = NULL;
+#endif
 
 struct jtv_state {
 	CURL					*http;
@@ -99,6 +102,10 @@ jtv_init(const char *id)
 static size_t
 jtv_usher_recv(const void *ptr, size_t size, size_t nmemb, void *userdata)
 {
+#ifdef CACHE_INT
+	if (u_out)
+		fwrite(ptr, size, nmemb, u_out);
+#endif
 	if (!usher_push_buf((usher_t*)userdata, ptr, size * nmemb)) {
 		fprintf(stderr, "usher XML not well formed\n");
 		return 0;
@@ -117,7 +124,11 @@ jtv_select_stream(struct jtv_state *j)
 	char err[CURL_ERROR_SIZE];
 	struct jtv_node *jn;
 
+#ifdef CACHE_INT
+	curl_easy_setopt(j->http, CURLOPT_URL, u_out ? j->usher_url : "file://" U_NAME);
+#else
 	curl_easy_setopt(j->http, CURLOPT_URL, j->usher_url);
+#endif
 	curl_easy_setopt(j->http, CURLOPT_FOLLOWLOCATION, 1);
 	curl_easy_setopt(j->http, CURLOPT_WRITEFUNCTION, jtv_usher_recv);
 	curl_easy_setopt(j->http, CURLOPT_WRITEDATA, j->usher);
@@ -132,7 +143,11 @@ jtv_select_stream(struct jtv_state *j)
 		fprintf(stderr, "Can't fetch usher status from %s\n", j->usher_url);
 		exit(EXIT_FAILURE);
 	}
-	if (memcmp(j->usher_url, "file://", 7) != 0 && http_code / 100 != 2) {
+	if (
+#ifdef CACGE_INT
+			memcmp(j->usher_url, "file://", 7) != 0 && u_out &&
+#endif
+			http_code / 100 != 2) {
 		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->usher_url, http_code);
 		exit(EXIT_FAILURE);
 	}
@@ -178,6 +193,10 @@ jtv_page_recv(const void *ptr, size_t size, size_t nmemb, void *userdata)
 	struct jtv_state *j = userdata;
 	unsigned len = size * nmemb;
 	if (len) {
+#ifdef CACHE_INT
+		if (p_out)
+			fwrite(ptr, size, nmemb, p_out);
+#endif
 		j->body = xrealloc(j->body, j->body_size + len + 1);
 		memcpy(j->body + j->body_size, ptr, len);
 		j->body_size += len;
@@ -193,7 +212,11 @@ jtv_fetch_swf_url(struct jtv_state *j)
 	long http_code = 0;
 	char err[CURL_ERROR_SIZE];
 
+#ifdef CACHE_INT
+	curl_easy_setopt(j->http, CURLOPT_URL, p_out ? j->page_url : "file://" P_NAME);
+#else
 	curl_easy_setopt(j->http, CURLOPT_URL, j->page_url);
+#endif
 	curl_easy_setopt(j->http, CURLOPT_FOLLOWLOCATION, 1);
 	curl_easy_setopt(j->http, CURLOPT_WRITEFUNCTION, jtv_page_recv);
 	curl_easy_setopt(j->http, CURLOPT_WRITEDATA, j);
@@ -209,8 +232,12 @@ jtv_fetch_swf_url(struct jtv_state *j)
 		exit(EXIT_FAILURE);
 	}
 
-	if (memcmp(j->page_url, "file://", 7) != 0 && http_code / 100 != 2) {
-		fprintf(stderr, "Can't fetch usher status from %s: HTTP code %ld\n", j->page_url, http_code);
+	if (
+#ifdef CACHE_INT
+			memcmp(j->page_url, "file://", 7) != 0 && p_out && 
+#endif
+			http_code / 100 != 2) {
+		fprintf(stderr, "Can't fetch justin page from %s: HTTP code %ld\n", j->page_url, http_code);
 		exit(EXIT_FAILURE);
 	}
 
@@ -260,12 +287,25 @@ print_usage(const char *argv_0, int exit_code)
 
 int main(int argc, char **argv)
 {
+	pid_t wrk;
+	int flv_pipe[2];
 	struct jtv_state *jtv;
 	struct jtv_node *s;
-	const char *rtmpdump = "rtmpdump";
+	struct jtv_rtmp *r;
 
 	if (argc < 2)
 		print_usage(argv[0], EXIT_FAILURE);
+
+#ifdef CACHE_INT
+	{
+		struct stat st;
+		time_t now = time(NULL);
+		if (stat(U_NAME, &st) != 0 || st.st_mtime + CACHE_INT < now)
+			u_out = fopen(U_NAME, "w");
+		if (stat(P_NAME, &st) != 0 || st.st_mtime + CACHE_INT < now)
+			p_out = fopen(P_NAME, "w");
+	}
+#endif
 
 	jtv = jtv_init(argv[1]);
 	printf("twitch url: %s\nusher url: %s\n", jtv->page_url, jtv->usher_url);
@@ -274,7 +314,64 @@ int main(int argc, char **argv)
 	s = jtv_select_stream(jtv);
 	curl_easy_cleanup(jtv->http);
 
-	execl(rtmpdump,
+#ifdef CACHE_INT
+	if (u_out)
+		fclose(u_out);
+	if (p_out)
+		fclose(p_out);
+#endif
+
+#if 1
+	if (pipe(flv_pipe) != 0) {
+		perror("Can't create FLV pipe");
+		exit(EXIT_FAILURE);
+	}
+	wrk = fork();
+	if (wrk == (pid_t) -1) {
+		perror("Can't create slave process");
+		exit(EXIT_FAILURE);
+	}
+
+	if (wrk == 0) {
+		struct pollfd pfd;
+		close(0);
+		close(flv_pipe[1]);
+		if (dup2(flv_pipe[0], 0) != 0) {
+			perror("dup2 for stdin");
+			exit(EXIT_FAILURE);
+		}
+		close(flv_pipe[0]);
+		pfd.fd = 0;
+		pfd.events = POLLIN;
+		if (poll(&pfd, 1, 10000) != 1) {
+			fprintf(stderr, "Timeout while waiting for RTMP data\n");
+			exit(EXIT_FAILURE);
+		}
+		execl("/usr/bin/mplayer", "/usr/bin/mplayer", "-", NULL);
+	} else {
+		int status;
+		close(flv_pipe[0]);
+		r = jrtmp_connect(s->jn_rtmp, s->jn_playpath, jtv->page_url,
+				s->jn_token, jtv->swf_url, "LNX 11,2,202,238",
+				flv_pipe[1]);
+
+		jrtmp_run(r);
+
+		close(flv_pipe[1]);
+		waitpid(wrk, &status, 0);
+	}
+#else
+	const char *rtmpdump_dir = NULL;
+	char rtmpdump[1024], preload[1024];
+	if (rtmpdump_dir) {
+		snprintf(preload, sizeof(preload), "%s/librtmp", rtmpdump_dir);
+		setenv("LD_LIBRARY_PATH", preload, 1);
+		snprintf(rtmpdump, sizeof(rtmpdump), "%s/rtmpdump", rtmpdump_dir);
+	} else {
+		strcpy(rtmpdump, "rtmpdump");
+	}
+	execl(
+			"/usr/bin/gdb", "/usr/bin/gdb", "--args",
 			rtmpdump,
 			"-r", s->jn_rtmp,
 			"-y", s->jn_playpath,
@@ -284,7 +381,8 @@ int main(int argc, char **argv)
 			"-p", jtv->page_url,
 			"-j", s->jn_token,
 			NULL
-			);
+		 );
+#endif
 
 	return 0;
 }
