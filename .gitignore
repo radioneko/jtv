@@ -4,7 +4,6 @@ configure
 Makefile
 Makefile.in
 install-sh
-m4
 .deps
 config.*
 aclocal.m4

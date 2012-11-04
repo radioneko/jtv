@@ -19,6 +19,7 @@
 
 #include "usher.h"
 #include "jtv_memory.h"
+#include "jtv_chat.h"
 
 /* if CACHE_INT is defined, then jtv will save usher & justin pages to disk and later use them */
 //#define CACHE_INT	180
@@ -34,6 +35,7 @@ struct jtv_state {
 	CURL					*http;
 	char					*page_url;
 	char					*usher_url;
+	char					*channel_id;
 	usher_t					*usher;
 	struct jtv_node_list	streams;
 	union {
@@ -95,6 +97,8 @@ jtv_init(const char *id)
 		fprintf(stderr, "Can't initialize usher parser\n");
 		exit (EXIT_FAILURE);
 	}
+
+	j->channel_id = xstrdup(channel_id);
 
 	return j;
 }
@@ -333,6 +337,7 @@ int main(int argc, char **argv)
 	}
 
 	if (wrk == 0) {
+		int dev_null = open("/dev/null", O_RDWR);
 		struct pollfd pfd;
 		close(0);
 		close(flv_pipe[1]);
@@ -347,7 +352,14 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Timeout while waiting for RTMP data\n");
 			exit(EXIT_FAILURE);
 		}
-		execl("/usr/bin/mplayer", "/usr/bin/mplayer", "-", NULL);
+		if (dev_null != -1) {
+			close(1);
+			close(2);
+			dup2(dev_null, 1);
+			dup2(dev_null, 2);
+			close(dev_null);
+		}
+		execl("/usr/bin/mplayer", "/usr/bin/mplayer", "-cache", "1024", "-", NULL);
 	} else {
 		int status;
 		close(flv_pipe[0]);
@@ -356,7 +368,8 @@ int main(int argc, char **argv)
 				s->jn_token, jtv->swf_url, "LNX 11,2,202,238",
 				flv_pipe[1]);
 
-		printf("Starting stream\n");
+		printf("Start streaming...\n");
+		jtv_chat_do(jtv->channel_id);
 		jrtmp_run(r);
 
 		close(flv_pipe[1]);

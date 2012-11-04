@@ -4,7 +4,6 @@ AM_INIT_AUTOMAKE(1.9, dist-bzip2, no-define)
 
 AC_CONFIG_SRCDIR(Makefile.in)
 AC_CONFIG_MACRO_DIR([m4])
-
 AC_CONFIG_HEADER(jtv_config.h)
 
 
@@ -26,6 +25,8 @@ AC_DEFINE([XML_CONTEXT_BYTES], 1024,
 	[Define to specify how much context to retain around the current parse point.])
 
 LIBCURL_CHECK_CONFIG(,7.10)
+
+ACX_PTHREAD([], AC_MSG_ERROR([POSIX threads missing]))
 
 AC_CONFIG_FILES([Makefile src/Makefile])
 AC_OUTPUT
