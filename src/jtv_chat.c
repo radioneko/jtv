@@ -14,6 +14,7 @@
 #include "jtv_chat.h"
 
 static const char *nick_colors[] = {
+#if 0
 	"\033[01;31m",
 	"\033[01;32m",
 	"\033[01;33m",
@@ -21,6 +22,9 @@ static const char *nick_colors[] = {
 	"\033[01;35m",
 	"\033[01;36m",
 	"\033[01;37m"
+#else
+#	include "xterm256.h"
+#endif
 };
 
 static const char *lcc_normal = "\033[00m";
