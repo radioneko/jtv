@@ -217,7 +217,10 @@ HTTP_get(struct HTTP_ctx *http, const char *url, HTTP_read_callback *cb)
       else if (rc >= 400)
 	ret = HTTPRES_BAD_REQUEST;
       else
-	ret = HTTPRES_REDIRECTED;
+	{
+	  ret = HTTPRES_REDIRECTED;
+	  *http->location = 0;
+	}
     }
 
   p1 = memchr(sb.sb_buf, '\n', sb.sb_size);
@@ -249,6 +252,13 @@ HTTP_get(struct HTTP_ctx *http, const char *url, HTTP_read_callback *cb)
 	{
 	  *p2 = '\0';
 	  strcpy(http->date, sb.sb_start + sizeof("Last-Modified: ") - 1);
+	}
+      else
+	if (!strncasecmp
+	    (sb.sb_start, "Location: ", sizeof("Location: ") - 1))
+	{
+	  *p2 = '\0';
+	  strcpy(http->location, sb.sb_start + sizeof("Location: ") - 1);
 	}
       p2 += 2;
       sb.sb_size -= p2 - sb.sb_start;
@@ -501,97 +511,109 @@ RTMP_HashSWF(const char *url, unsigned int *size, unsigned char *hash,
   sprintf(path, "%s%s" DIRSEP ".swfinfo", hpre.av_val, home.av_val);
 
   f = fopen(path, "r+");
-  while (f)
+  do
     {
-      char buf[4096], *file, *p;
-
-      file = strchr(url, '/');
-      if (!file)
-	break;
-      file += 2;
-      file = strchr(file, '/');
-      if (!file)
-	break;
-      file++;
-      hlen = file - url;
-      p = strrchr(file, '/');
-      if (p)
-	file = p;
-      else
-	file--;
-
-      while (fgets(buf, sizeof(buf), f))
+      while (f)
 	{
-	  char *r1;
+	  char buf[4096], *file, *p;
 
-	  got = 0;
+	  file = strchr(url, '/');
+	  if (!file)
+	    break;
+	  file += 2;
+	  file = strchr(file, '/');
+	  if (!file)
+	    break;
+	  file++;
+	  hlen = file - url;
+	  p = strrchr(file, '/');
+	  if (p)
+	    file = p;
+	  else
+	    file--;
 
-	  if (strncmp(buf, "url: ", 5))
-	    continue;
-	  if (strncmp(buf + 5, url, hlen))
-	    continue;
-	  r1 = strrchr(buf, '/');
-	  i = strlen(r1);
-	  r1[--i] = '\0';
-	  if (strncmp(r1, file, i))
-	    continue;
-	  pos = ftell(f);
-	  while (got < 4 && fgets(buf, sizeof(buf), f))
+	  while (fgets(buf, sizeof(buf), f))
 	    {
-	      if (!strncmp(buf, "size: ", 6))
+	      char *r1;
+
+	      got = 0;
+
+	      if (strncmp(buf, "url: ", 5))
+		continue;
+	      if (strncmp(buf + 5, url, hlen))
+		continue;
+	      r1 = strrchr(buf, '/');
+	      i = strlen(r1);
+	      r1[--i] = '\0';
+	      if (strncmp(r1, file, i))
+		continue;
+	      pos = ftell(f);
+	      while (got < 4 && fgets(buf, sizeof(buf), f))
 		{
-		  *size = strtol(buf + 6, NULL, 16);
-		  got++;
+		  if (!strncmp(buf, "size: ", 6))
+		    {
+		      *size = strtol(buf + 6, NULL, 16);
+		      got++;
+		    }
+		  else if (!strncmp(buf, "hash: ", 6))
+		    {
+		      unsigned char *ptr = hash, *in = (unsigned char *)buf + 6;
+		      int l = strlen((char *)in) - 1;
+		      for (i = 0; i < l; i += 2)
+			*ptr++ = (HEX2BIN(in[i]) << 4) | HEX2BIN(in[i + 1]);
+		      got++;
+		    }
+		  else if (!strncmp(buf, "date: ", 6))
+		    {
+		      buf[strlen(buf) - 1] = '\0';
+		      strncpy(date, buf + 6, sizeof(date));
+		      got++;
+		    }
+		  else if (!strncmp(buf, "ctim: ", 6))
+		    {
+		      buf[strlen(buf) - 1] = '\0';
+		      ctim = make_unix_time(buf + 6);
+		      got++;
+		    }
+		  else if (!strncmp(buf, "url: ", 5))
+		    break;
 		}
-	      else if (!strncmp(buf, "hash: ", 6))
-		{
-		  unsigned char *ptr = hash, *in = (unsigned char *)buf + 6;
-		  int l = strlen((char *)in) - 1;
-		  for (i = 0; i < l; i += 2)
-		    *ptr++ = (HEX2BIN(in[i]) << 4) | HEX2BIN(in[i + 1]);
-		  got++;
-		}
-	      else if (!strncmp(buf, "date: ", 6))
-		{
-		  buf[strlen(buf) - 1] = '\0';
-		  strncpy(date, buf + 6, sizeof(date));
-		  got++;
-		}
-	      else if (!strncmp(buf, "ctim: ", 6))
-		{
-		  buf[strlen(buf) - 1] = '\0';
-		  ctim = make_unix_time(buf + 6);
-		  got++;
-		}
-	      else if (!strncmp(buf, "url: ", 5))
-		break;
+	      break;
 	    }
 	  break;
 	}
+
+      cnow = time(NULL);
+      /* If we got a cache time, see if it's young enough to use directly */
+      if (age && ctim > 0)
+	{
+	  ctim = cnow - ctim;
+	  ctim /= 3600 * 24;	/* seconds to days */
+	  if (ctim < age)		/* ok, it's new enough */
+	    goto out;
+	}
+
+      in.first = 1;
+      HMAC_setup(in.ctx, "Genuine Adobe Flash Player 001", 30);
+      inflateInit(&zs);
+      in.zs = &zs;
+
+      http.date = date;
+      http.data = &in;
+
+      httpres = HTTP_get(&http, url, swfcrunch);
+
+      inflateEnd(&zs);
+      if (httpres == HTTPRES_REDIRECTED && *http.location) {
+	  RTMP_Log(RTMP_LOGINFO, "%s: redirect to '%s'", __FUNCTION__, http.location);
+	  url = http.location;
+	  if (f)
+	      rewind(f);
+	  continue;
+      }
       break;
     }
-
-  cnow = time(NULL);
-  /* If we got a cache time, see if it's young enough to use directly */
-  if (age && ctim > 0)
-    {
-      ctim = cnow - ctim;
-      ctim /= 3600 * 24;	/* seconds to days */
-      if (ctim < age)		/* ok, it's new enough */
-	goto out;
-    }
-
-  in.first = 1;
-  HMAC_setup(in.ctx, "Genuine Adobe Flash Player 001", 30);
-  inflateInit(&zs);
-  in.zs = &zs;
-
-  http.date = date;
-  http.data = &in;
-
-  httpres = HTTP_get(&http, url, swfcrunch);
-
-  inflateEnd(&zs);
+  while (1);
 
   if (httpres != HTTPRES_OK && httpres != HTTPRES_OK_NOT_MODIFIED)
     {

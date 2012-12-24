@@ -35,6 +35,7 @@ typedef enum {
 
 struct HTTP_ctx {
   char *date;
+  char location[1024];
   int size;
   int status;
   void *data;
