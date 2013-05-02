@@ -269,7 +269,7 @@ jtv_fetch_swf_url(struct jtv_state *j)
 			/* void */;
 		c = *e;
 		*e = 0;
-		if (strstr(p, "live_site_player") == NULL) {
+		if (strstr(p, "TwitchPlayer.swf"  /* "live_site_player" */) == NULL) {
 			*e = c;
 			continue;
 		}
