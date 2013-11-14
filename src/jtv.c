@@ -252,7 +252,8 @@ jtv_fetch_swf_url(struct jtv_state *j)
 
 	/* Now find swfObject string */
 	char *p = j->body;
-	static const char s[] = "swfobject.embedSWF(";
+	//static const char s[] = "swfobject.embedSWF(";
+	static const char s[] = "\"url\":";
 	while (1) {
 		char *e, c;
 		p = strstr(p, s);

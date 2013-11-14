@@ -182,10 +182,10 @@ jlist_update_uint(struct jtv_node_list *jl, const char *node_id, unsigned offset
 }
 
 static struct jtv_usher_param usher_data[] = {
-	{"/nodes/@/play",			JFT_STRING,		offsetof(struct jtv_node, jn_playpath)},
-	{"/nodes/@/connect",		JFT_STRING,		offsetof(struct jtv_node, jn_rtmp)},
-	{"/nodes/@/token"	,		JFT_STRING,		offsetof(struct jtv_node, jn_token)},
-	{"/nodes/@/video_height",	JFT_UINT,		offsetof(struct jtv_node, jn_vheight)}
+	{"/results/@/play",			JFT_STRING,		offsetof(struct jtv_node, jn_playpath)},
+	{"/results/@/connect",		JFT_STRING,		offsetof(struct jtv_node, jn_rtmp)},
+	{"/results/@/token"	,		JFT_STRING,		offsetof(struct jtv_node, jn_token)},
+	{"/results/@/video_height",	JFT_UINT,		offsetof(struct jtv_node, jn_vheight)}
 };
 
 /* Perform match check. Return node id.  */
