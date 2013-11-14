@@ -103,7 +103,7 @@ jrtmp_connect(const char *rtmp, const char *playpath,
 			&flashVer, &rnull, &usherToken, 0 /*dSeek*/,
 			0 /* dStopOffset */, FALSE /* dLiveStream */, 
 			30 /* DEF_TIMEOUT */);
-	r->rtmp.Link.lFlags |= RTMP_LF_BUFX;
+	r->rtmp.Link.lFlags |= /*RTMP_LF_BUFX | */RTMP_LF_LIVE;
 
 	RTMP_SetBufferMS(&r->rtmp, 10 * 60 * 60 * 1000);
 

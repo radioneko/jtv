@@ -97,6 +97,7 @@ static int SendFCSubscribe(RTMP *r, AVal *subscribepath);
 static int SendPlay(RTMP *r);
 static int SendBytesReceived(RTMP *r);
 static int SendUsherToken(RTMP *r, AVal *usherToken);
+static int SendAccessCode(RTMP *r, AVal *code);
 
 #if 0				/* unused */
 static int SendBGHasStream(RTMP *r, double dId, AVal *playpath);
@@ -1681,6 +1682,39 @@ SendUsherToken(RTMP *r, AVal *usherToken)
 
   return RTMP_SendPacket(r, &packet, FALSE);
 }
+
+
+static const AVal av_NetStream_Authenticate_AccessCode = AVC("NetStream.Authenticate.AccessCode");
+
+static int
+SendAccessCode(RTMP *r, AVal *code /* unused */)
+{
+  static const AVal av_null = AVC("null");
+  RTMPPacket packet;
+  char pbuf[1024], *pend = pbuf + sizeof(pbuf);
+  char *enc;
+  packet.m_nChannel = 0x03;	/* control channel (invoke) */
+  packet.m_headerType = RTMP_PACKET_SIZE_LARGE;
+  packet.m_packetType = RTMP_PACKET_TYPE_INVOKE;
+  packet.m_nTimeStamp = 0;
+  packet.m_nInfoField2 = 0;
+  packet.m_hasAbsTimestamp = 0;
+  packet.m_body = pbuf + RTMP_MAX_HEADER_SIZE;
+
+  enc = packet.m_body;
+  enc = AMF_EncodeString(enc, pend, &av_NetStream_Authenticate_AccessCode);
+  enc = AMF_EncodeNumber(enc, pend, 2 /* ++r->m_numInvokes */);
+  *enc++ = AMF_NULL;
+  enc = AMF_EncodeString(enc, pend, &av_null);
+
+  if (!enc)
+    return FALSE;
+
+  packet.m_nBodySize = enc - packet.m_body;
+
+  return RTMP_SendPacket(r, &packet, FALSE);
+}
+
 /******************************************/
 
 SAVC(releaseStream);
@@ -2084,6 +2118,7 @@ SendPlay(RTMP *r)
   if (!enc)
     return FALSE;
 
+#if 0
   /* Optional parameters start and len.
    *
    * start: -2, -1, 0, positive number
@@ -2116,7 +2151,7 @@ SendPlay(RTMP *r)
       if (!enc)
 	return FALSE;
     }
-
+#endif
   packet.m_nBodySize = enc - packet.m_body;
 
   return RTMP_SendPacket(r, &packet, TRUE);
@@ -2409,6 +2444,8 @@ HandleInvoke(RTMP *r, const char *body, unsigned int nBodySize)
 	      /* Authenticate on Justin.tv legacy servers before sending FCSubscribe */
 	      if (r->Link.usherToken.av_len)
 	        SendUsherToken(r, &r->Link.usherToken);
+		  /* !!!!!!!!!!!!!!!!! send access code */
+		  SendAccessCode(r, NULL);
 	      /* Send the FCSubscribe if live stream or if subscribepath is set */
 	      if (r->Link.subscribepath.av_len)
 	        SendFCSubscribe(r, &r->Link.subscribepath);
